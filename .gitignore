@@ -1,0 +1,11 @@
+# Credentials, runtime state, and local troubleshooting captures
+*.xml
+*.log
+*.log.*
+*.pid
+status.json
+stop.flag
+*.new
+*.html
+Portal.js
+*.zip
