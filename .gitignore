@@ -9,3 +9,7 @@ stop.flag
 *.html
 Portal.js
 *.zip
+__pycache__/
+.venv/
+settings.json
+monitor.lock
