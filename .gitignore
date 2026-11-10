@@ -13,3 +13,5 @@ __pycache__/
 .venv/
 settings.json
 monitor.lock
+CampusConnect.exe
+launcher/out/

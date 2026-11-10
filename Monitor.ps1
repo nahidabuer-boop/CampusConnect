@@ -88,13 +88,13 @@ function Write-MonitorStatus([string]$State, [string]$Detail) {
     }
     $pending = $statusPath + '.new'
     @{ state=$State; detail=$display; checkedAt=[DateTime]::UtcNow.ToString('o');
-       nextRetryAt=$retryAt; retryInSeconds=$remaining; resultCode=$resultCode; monitorVersion='0.2.1' } |
+       nextRetryAt=$retryAt; retryInSeconds=$remaining; resultCode=$resultCode; monitorVersion='0.2.2' } |
         ConvertTo-Json -Compress | Set-Content -LiteralPath $pending -Encoding UTF8
     Move-Item -LiteralPath $pending -Destination $statusPath -Force
 }
 
 try {
-    Write-MonitorLog 'Monitor 0.2.1 started. Normal failures retry after 15 seconds; possible credential failures wait 900 seconds.'
+    Write-MonitorLog 'Monitor 0.2.2 started. Normal failures retry after 15 seconds; possible credential failures wait 900 seconds.'
     while ($true) {
         $state = Read-Status
         if ($state -eq 'online') {

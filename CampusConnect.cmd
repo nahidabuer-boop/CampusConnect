@@ -1,3 +1,7 @@
 @echo off
-powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "%~dp0Setup.ps1"
-if errorlevel 1 pause
+if exist "%~dp0CampusConnect.exe" (
+    start "" "%~dp0CampusConnect.exe"
+) else (
+    echo Download the complete Windows ZIP from Releases, or build launcher\build.cmd first.
+    pause
+)
