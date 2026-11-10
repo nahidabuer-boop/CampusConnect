@@ -101,3 +101,17 @@ function New-LoginQuery($Credential, [string]$Ip, [string]$AcId, [string]$Token)
         chksum=[CampusSrun]::Checksum($sum); n='200'; type='1'; double_stack='0'; os='Windows'; name='Windows'
     }
 }
+
+function Get-ReconnectDelay($Result) {
+    if (('{0} {1} {2}' -f $Result.error, $Result.error_msg, $Result.ecode) -match 'password|passwd|E2553') { return 900 }
+    return 15
+}
+
+function Get-PortalResultCode($Result) {
+    $safe = @()
+    foreach ($name in @('error', 'ecode', 'error_msg', 'suc_msg')) {
+        $value = [string]$Result.$name
+        if ($value -match '^[A-Za-z0-9_:+-]{1,80}$') { $safe += ($name + '=' + $value) }
+    }
+    $safe -join '; '
+}

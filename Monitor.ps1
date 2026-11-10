@@ -55,24 +55,54 @@ $settings = Import-Clixml -LiteralPath (Join-Path $PSScriptRoot 'settings.xml')
 $portal = Get-PortalSettings $settings.Link
 $statusPath = Join-Path $PSScriptRoot 'status.json'
 $failures = 0
-$retrySeconds = 30
+$retrySeconds = 15
 $nextAttempt = [DateTime]::MinValue
 $detail = ''
 $lastState = ''
+$lastLogKey = ''
+$resultCode = ''
+
+function Write-MonitorLog([string]$Message) {
+    try {
+        $log = Join-Path $PSScriptRoot 'monitor.log'
+        if ((Test-Path -LiteralPath $log) -and (Get-Item -LiteralPath $log).Length -ge 1MB) {
+            Move-Item -LiteralPath $log -Destination ($log + '.old') -Force
+        }
+        Add-Content -LiteralPath $log -Encoding UTF8 -Value ([DateTimeOffset]::Now.ToString('o') + ' ' + $Message)
+    } catch {}
+}
 
 function Write-MonitorStatus([string]$State, [string]$Detail) {
-    @{ state=$State; detail=$Detail; checkedAt=[DateTime]::UtcNow.ToString('o') } |
-        ConvertTo-Json -Compress | Set-Content -LiteralPath $statusPath -Encoding UTF8
+    $remaining = 0
+    $retryAt = $null
+    if ($State -eq 'offline' -and $nextAttempt -gt [DateTime]::UtcNow) {
+        $remaining = [int][Math]::Ceiling(($nextAttempt - [DateTime]::UtcNow).TotalSeconds)
+        $retryAt = $nextAttempt.ToString('o')
+    }
+    $display = $Detail
+    if ($remaining -gt 0) { $display += " 距下次重试约 $remaining 秒。" }
+    $key = $State + '|' + $Detail + '|' + $resultCode + '|' + $retryAt
+    if ($key -ne $script:lastLogKey) {
+        Write-MonitorLog ("state=$State; $Detail result=$resultCode; nextRetryAt=$retryAt")
+        $script:lastLogKey = $key
+    }
+    $pending = $statusPath + '.new'
+    @{ state=$State; detail=$display; checkedAt=[DateTime]::UtcNow.ToString('o');
+       nextRetryAt=$retryAt; retryInSeconds=$remaining; resultCode=$resultCode; monitorVersion='0.2.1' } |
+        ConvertTo-Json -Compress | Set-Content -LiteralPath $pending -Encoding UTF8
+    Move-Item -LiteralPath $pending -Destination $statusPath -Force
 }
 
 try {
+    Write-MonitorLog 'Monitor 0.2.1 started. Normal failures retry after 15 seconds; possible credential failures wait 900 seconds.'
     while ($true) {
         $state = Read-Status
         if ($state -eq 'online') {
             $failures = 0
-            $retrySeconds = 30
+            $retrySeconds = 15
             $nextAttempt = [DateTime]::MinValue
             $detail = '认证正常，正在后台监测。'
+            $resultCode = ''
         } elseif ($state -eq 'offline') {
             $failures++
             if ($lastState -ne 'offline') { $detail = '检测到未认证，正在确认。' }
@@ -80,6 +110,8 @@ try {
                 $detail = '正在尝试自动登录。'
                 Write-MonitorStatus $state $detail
                 $stage = '读取认证页面'
+                $retrySeconds = 15
+                $resultCode = ''
                 try {
                     $ip = Read-ClientIp
                     $stage = '通过 HTTPS 获取挑战码'
@@ -95,16 +127,16 @@ try {
                         $query.callback = 'campusConnect'
                         try { $result = ConvertFrom-PortalResponse (Read-Portal ($portal.SecureOrigin + '/cgi-bin/srun_portal') $query) }
                         finally { $query.Clear() }
+                        $resultCode = Get-PortalResultCode $result
+                        $retrySeconds = Get-ReconnectDelay $result
                         if ($result.error -eq 'ok') { $detail = '登录已受理，正在等待确认在线。' }
                         elseif (('{0} {1} {2}' -f $result.error, $result.error_msg, $result.ecode) -match 'password|passwd|E2553') {
                             $detail = '学校可能拒绝了账号或密码，请核对后重新保存。'
-                            $retrySeconds = 900
                         } else { $detail = '学校未确认登录成功，稍后重试。' }
                     } elseif ($state -eq 'online') { $detail = '已恢复在线。' }
                     else { $detail = '无法确认当前认证状态，稍后检查。' }
                 } catch { $detail = "$stage 失败，稍后重试。" }
                 $nextAttempt = [DateTime]::UtcNow.AddSeconds($retrySeconds)
-                $retrySeconds = [Math]::Min(900, $retrySeconds * 2)
             }
         } else {
             $failures = 0
@@ -112,6 +144,10 @@ try {
         }
         Write-MonitorStatus $state $detail
         $lastState = $state
-        Start-Sleep -Seconds 10
+        $sleepSeconds = 10
+        if ($state -eq 'offline' -and $nextAttempt -gt [DateTime]::UtcNow) {
+            $sleepSeconds = [Math]::Min(10, [Math]::Max(1, [int][Math]::Ceiling(($nextAttempt - [DateTime]::UtcNow).TotalSeconds)))
+        }
+        Start-Sleep -Seconds $sleepSeconds
     }
 } finally { $client.Dispose() }

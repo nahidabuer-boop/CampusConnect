@@ -112,6 +112,7 @@ class Portal:
         self.secure_page = urlunsplit(('https', authority, parts.path, parts.query, ''))
         self.read_origin = f'{parts.scheme}://{parts.netloc}'
         self.opener = build_opener(ProxyHandler({}), NoRedirect())
+        self.result_code = ''
 
     def read(self, url, params=None):
         parts = urlsplit(url)
@@ -144,6 +145,7 @@ class Portal:
         raise ValueError('未能从认证页面读取客户端 IP。')
 
     def reconnect(self, username, password, platform, should_login):
+        self.result_code = ''
         stage = '读取认证页面'
         try:
             ip = self.client_ip()
@@ -159,6 +161,9 @@ class Portal:
             stage = '通过 HTTPS 提交登录'
             params = login_params(username, password, ip, self.ac_id, token, platform)
             reply = parse_response(self.read(self.secure_origin + '/cgi-bin/srun_portal', params))
+            self.result_code = '; '.join(
+                f'{key}={reply[key]}' for key in ('error', 'ecode', 'error_msg', 'suc_msg')
+                if re.fullmatch(r'[A-Za-z0-9_:+-]{1,80}', str(reply.get(key, ''))))
         except (OSError, ValueError):
             return f'{stage}失败，稍后重试。', False
         if reply.get('error') == 'ok':

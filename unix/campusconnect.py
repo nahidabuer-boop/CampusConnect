@@ -3,6 +3,7 @@
 import argparse
 import fcntl
 import hashlib
+import math
 import json
 import os
 import plistlib
@@ -108,8 +109,30 @@ def disable_autostart():
         launchctl('bootout', f'gui/{os.getuid()}/{LABEL}')
 
 
-def report(state, detail):
-    write_json(STATUS, {'state': state, 'detail': detail, 'checked_at': time.time()})
+LAST_LOG_KEY = None
+
+
+def report(state, detail, retry_in=0, result_code=''):
+    global LAST_LOG_KEY
+    key = (state, detail, result_code)
+    if key != LAST_LOG_KEY:
+        try:
+            log = APP_DIR / 'monitor.log'
+            if log.exists() and log.stat().st_size >= 1024 * 1024:
+                log.replace(APP_DIR / 'monitor.log.old')
+            with log.open('a', encoding='utf-8') as stream:
+                stamp = time.strftime('%Y-%m-%dT%H:%M:%S%z')
+                stream.write(f'{stamp} state={state}; {detail} result={result_code}; retryIn={retry_in}\n')
+            LAST_LOG_KEY = key
+        except OSError:
+            pass
+    display = f'{detail} 距下次重试约 {retry_in} 秒。' if retry_in else detail
+    write_json(STATUS, {'state': state, 'detail': display, 'checked_at': time.time(),
+                        'retry_in_seconds': retry_in, 'result_code': result_code, 'version': '0.2.1'})
+
+
+def retry_delay(credential_rejected=False):
+    return 900 if credential_rejected else 15
 
 
 def run_monitor():
@@ -126,7 +149,7 @@ def watch_network():
     previous = None
     portal = None
     failures = 0
-    wait = 30
+    wait = 15
     retry_at = 0
     detail = ''
     while True:
@@ -138,11 +161,12 @@ def watch_network():
         if profile != previous:
             portal = Portal(settings['link'])
             previous = profile
-            failures, wait, retry_at = 0, 30, 0
+            failures, wait, retry_at = 0, 15, 0
             detail = ''
         state = portal.status()
         if state == 'online':
-            failures, wait, retry_at = 0, 30, 0
+            failures, wait, retry_at = 0, 15, 0
+            portal.result_code = ''
             detail = '认证正常，正在后台监测。'
         elif state == 'offline':
             failures += 1
@@ -160,20 +184,19 @@ def watch_network():
                     password = None
                 if not password:
                     detail = '无法读取系统钥匙串，请解锁后重新保存凭据。'
-                    wait = 30
+                    wait = 15
                 else:
                     detail, rejected = portal.reconnect(
                         account, password, 'Mac' if MAC else 'Linux', lambda: read_json(SETTINGS) == settings)
                     del password
-                    if rejected:
-                        wait = 900
+                    wait = retry_delay(rejected)
                 retry_at = time.monotonic() + wait
-                wait = min(900, wait * 2)
         else:
             failures = 0
             detail = '认证接口不可达或不兼容，请检查校园网和认证链接。'
-        report(state, detail)
-        time.sleep(10)
+        remaining = max(0, math.ceil(retry_at - time.monotonic())) if state == 'offline' else 0
+        report(state, detail, remaining, portal.result_code)
+        time.sleep(min(10, max(1, remaining)) if remaining else 10)
 
 
 def run_ui():

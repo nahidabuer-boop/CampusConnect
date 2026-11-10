@@ -1,0 +1,88 @@
+name: Publish CampusConnect v0.2.1
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/release-v0.2.1.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-v0.2.1
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate retry policy
+        run: |
+          python3 -m py_compile unix/campusconnect.py unix/srun.py
+          python3 - <<'PY'
+          import sys
+          sys.path.insert(0, 'unix')
+          from campusconnect import retry_delay
+          assert retry_delay() == 15
+          assert retry_delay(True) == 900
+          PY
+      - name: Package Windows, macOS and Linux
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
+          root = Path('.')
+          output = Path('release-assets')
+          output.mkdir(exist_ok=True)
+          common = ('campusconnect.py', 'srun.py', 'requirements.txt', 'start.sh', 'README.md')
+          packages = {
+              'Windows': {name: root / name for name in ('CampusConnect.cmd', 'Setup.ps1', 'Srun.ps1', 'Monitor.ps1', 'README.md', '.gitignore', '使用说明.txt')},
+              'macOS': {name: root / 'unix' / name for name in (*common, 'CampusConnect.command')},
+              'Linux': {name: root / 'unix' / name for name in common},
+          }
+          for platform, files in packages.items():
+              files['LICENSE'] = root / 'LICENSE'
+              target = output / f'CampusConnect-v0.2.1-{platform}.zip'
+              with ZipFile(target, 'w', ZIP_DEFLATED) as archive:
+                  for name, path in files.items():
+                      info = ZipInfo(name)
+                      info.create_system = 3
+                      info.external_attr = (0o100755 if name.endswith(('.sh', '.command')) else 0o100644) << 16
+                      archive.writestr(info, path.read_bytes(), compress_type=ZIP_DEFLATED)
+              with ZipFile(target) as archive:
+                  assert archive.testzip() is None
+                  assert set(archive.namelist()) == set(files)
+                  assert all(archive.read(name) == path.read_bytes() for name, path in files.items())
+              print(f'{target.name}: verified')
+          notes = '''本次修复充值或临时登录失败后等待时间过长的问题。
+
+          - 普通登录失败在请求结束后约 15 秒重试，疑似账号密码错误等待 15 分钟。
+          - 界面显示重试倒计时，记录历史状态和过滤后的认证结果码。
+          - 更正凭据后点击“保存并启用自启”，即可重新检查并清除原等待时间。
+          - Windows、macOS 和 Linux 桌面版同步更新。
+
+          升级时先用旧版停止并关闭自启，再解压对应系统的 ZIP，从新版重新保存配置。
+          Windows 为已实测版本的修复更新；macOS 和 Linux 仍为预览版，尚待真实设备验证。
+          '''
+          Path('release-notes.md').write_text(notes, encoding='utf-8')
+          PY
+      - name: Publish verified preview packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v0.2.1 --json isDraft --jq 'if .isDraft then "draft" else "published" end' > release-state.txt 2>/dev/null; then
+            if [ "$(cat release-state.txt)" != 'draft' ]; then
+              echo 'v0.2.1 is already published; leaving it unchanged.'
+              exit 0
+            fi
+          else
+            gh release create v0.2.1 --target "$GITHUB_SHA" --title 'CampusConnect v0.2.1（重试策略修复）' --notes-file release-notes.md --prerelease --draft
+          fi
+          gh release upload v0.2.1 release-assets/*.zip --clobber
+          gh release edit v0.2.1 --draft=false
