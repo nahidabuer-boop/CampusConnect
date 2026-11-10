@@ -6,7 +6,7 @@
 
 | 系统 | 下载 | 启动方式 |
 | --- | --- | --- |
-| Windows | [Windows ZIP](https://github.com/nahidabuer-boop/CampusConnect/releases/download/v0.2.2/CampusConnect-v0.2.2-Windows.zip) | 解压后双击 `CampusConnect.exe` |
+| Windows | [Windows ZIP](https://github.com/nahidabuer-boop/CampusConnect/releases/download/v0.2.3/CampusConnect-v0.2.3-Windows.zip) | 解压后双击 `CampusConnect.exe` |
 | macOS | [macOS ZIP](https://github.com/nahidabuer-boop/CampusConnect/releases/download/v0.2.1/CampusConnect-v0.2.1-macOS.zip) | 安装 Python 后双击 `CampusConnect.command` |
 | Linux 桌面 | [Linux ZIP](https://github.com/nahidabuer-boop/CampusConnect/releases/download/v0.2.1/CampusConnect-v0.2.1-Linux.zip) | 安装依赖后在解压目录执行 `bash start.sh` |
 
@@ -22,7 +22,7 @@ macOS 和 Linux 版需要 Python 3.10 或更新版本、Tkinter 和系统钥匙�
 
 后台每 10 秒检查一次认证状态，连续两次收到明确的未认证状态后才尝试登录。自启发生在当前用户登录系统之后。需要暂停时，点击「停止并关闭自启」。
 
-Windows 0.2.2 使用原生无控制台启动器，设置界面和监测进程分别运行。关闭设置窗口会收进通知区域，双击托盘图标或再次打开程序即可查看状态。右键托盘可以打开设置、停止自启，或仅退出设置界面。监测和托盘分别由用户登录任务启动。
+Windows 0.2.3 使用原生无控制台启动器，设置界面和监测进程分别运行。关闭设置窗口会收进通知区域，双击托盘图标或再次打开程序即可查看状态。右键托盘可以打开设置、停止自启，或仅退出设置界面。监测和托盘分别由用户登录任务启动。
 
 普通登录失败在请求结束后约 15 秒重试；学校返回疑似账号密码错误时，等待 15 分钟重试。界面显示剩余等待时间。修改凭据后请点击「保存并启用自启」，后台会使用新凭据重新检查并清除原来的等待时间。
 

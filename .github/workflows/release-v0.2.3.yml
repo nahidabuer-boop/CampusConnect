@@ -1,0 +1,101 @@
+name: Publish CampusConnect v0.2.3 Windows
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/release-v0.2.3.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-v0.2.3
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build native console-free launcher
+        shell: cmd
+        run: launcher\build.cmd
+      - name: Verify settings close and restore
+        shell: powershell
+        run: |
+          Copy-Item launcher/out/CampusConnect.exe CampusConnect.exe
+          $process = Start-Process -FilePath (Join-Path $PWD 'CampusConnect.exe') -ArgumentList '--check-ui' -WindowStyle Hidden -PassThru
+          if (-not $process.WaitForExit(30000)) { $process.Kill(); throw 'UI test timed out' }
+          if ($process.ExitCode -ne 0) { throw 'UI test failed' }
+          powershell.exe -NoProfile -STA -NonInteractive -ExecutionPolicy Bypass -File Setup.ps1 -CheckUi -StartHidden
+          if ($LASTEXITCODE -ne 0) { throw 'Hidden tray restore test failed' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-launcher
+          path: launcher/out/CampusConnect.exe
+          retention-days: 3
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-launcher
+          path: launcher/out
+      - name: Package and verify Windows files
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
+          names = ('CampusConnect.cmd', 'Setup.ps1', 'Srun.ps1', 'Monitor.ps1', 'README.md', '.gitignore', '使用说明.txt', 'LICENSE')
+          files = {name: Path(name) for name in names}
+          files['CampusConnect.exe'] = Path('launcher/out/CampusConnect.exe')
+          output = Path('release-assets')
+          output.mkdir(exist_ok=True)
+          target = output / 'CampusConnect-v0.2.3-Windows.zip'
+          with ZipFile(target, 'w', ZIP_DEFLATED) as archive:
+              for name, path in files.items():
+                  info = ZipInfo(name)
+                  info.create_system = 3
+                  info.external_attr = 0o100644 << 16
+                  archive.writestr(info, path.read_bytes(), compress_type=ZIP_DEFLATED)
+          with ZipFile(target) as archive:
+              assert archive.testzip() is None
+              assert set(archive.namelist()) == set(files)
+              assert all(archive.read(name) == path.read_bytes() for name, path in files.items())
+          Path('release-notes.md').write_text('''Windows 启动方式与状态查看修复。
+
+          - 使用原生启动器，设置界面和后台均不再依赖黑色 PowerShell 窗口。
+          - 关闭白色窗口收进托盘，双击图标或再次打开程序查看状态。
+          - 后台监测与托盘界面分开运行，并在登录 Windows 后分别自启。
+          - 保留普通失败约 15 秒重试、疑似凭据错误等待 15 分钟、倒计时和历史日志。
+
+          解压完整 ZIP 后双击 CampusConnect.exe。旧版升级时先停用旧版并退出设置界面，再从新版保存配置。
+          此次仅更新 Windows；macOS 和 Linux 继续使用 v0.2.1 下载包。
+          ''', encoding='utf-8')
+          PY
+      - name: Publish Windows preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v0.2.3 --json isDraft --jq 'if .isDraft then "draft" else "published" end' > release-state.txt 2>/dev/null; then
+            if [ "$(cat release-state.txt)" != 'draft' ]; then
+              echo 'v0.2.3 is already published.'
+              exit 0
+            fi
+          else
+            gh release create v0.2.3 --target "$GITHUB_SHA" --title 'CampusConnect v0.2.3（Windows 托盘与后台修复）' --notes-file release-notes.md --prerelease --draft
+          fi
+          gh release upload v0.2.3 release-assets/*.zip --clobber
+          gh release edit v0.2.3 --draft=false

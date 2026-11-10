@@ -170,6 +170,13 @@ $form.Add_FormClosing({
         $form.Hide()
     }
 })
+$script:hideOnFirstShow = [bool]$StartHidden
+$form.Add_Shown({
+    if ($script:hideOnFirstShow) {
+        $script:hideOnFirstShow = $false
+        $form.Hide()
+    }
+})
 
 if ($CheckUi) {
     $form.Show()
@@ -235,7 +242,6 @@ $disable.Add_Click({
 try {
     $tray.Visible = $true
     $timer.Start()
-    if ($StartHidden) { $form.Add_Shown({ $form.Hide() }) }
     [Windows.Forms.Application]::Run($form)
 } finally {
     $tray.Visible = $false
